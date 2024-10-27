@@ -9,7 +9,7 @@ const Database = struct {
     port: u32 = 3306,
 };
 
-const DatabaseError = error{
+pub const DatabaseError = error{
     ConnectionLost,
     DatabaseNotFound,
     BadHost,
@@ -19,7 +19,7 @@ const DatabaseError = error{
     ServerLost,
     UnknownError,
 };
-const MemoryError = error{
+pub const MemoryError = error{
     OutOfMemory,
     OutOfResources,
 };
@@ -54,7 +54,7 @@ pub const DB = struct {
             c.CLIENT_MULTI_STATEMENTS,
         ) == null) {
             print("Connect to database failed: {s}\n", .{c.mysql_error(db)});
-            return Database.DatabaseNotFound;
+            return DatabaseError.DatabaseNotFound;
         }
         const self = Self{
             .conn = db,
@@ -66,6 +66,7 @@ pub const DB = struct {
     pub fn deinit(self: Self) void {
         c.mysql_close(self.conn);
     }
+
     pub fn execute(self: DB, query: []const u8) DatabaseError!void {
         const success: c_uint = c.mysql_real_query(self.conn, query.ptr, query.len);
         return switch (success) {
@@ -89,6 +90,9 @@ pub const DB = struct {
     }
     pub fn autoCommit(self: Self, mode: bool) void {
         c.autoCommit(self.conn, mode);
+    }
+    pub fn commit(self: Self) bool {
+        return c.mysql_commit(self.conn);
     }
     pub fn queryTable(self: DB) !void {
         const query =
@@ -206,4 +210,29 @@ pub const DB = struct {
             }
         }
     }
+};
+
+pub const types = enum(c_int) {
+    TYNY = c.MYSQL_TYPE_TINY,
+    SHORT = c.MYSQL_TYPE_SHORT,
+    LONG = c.MYSQL_TYPE_LONG,
+    INT24 = c.MYSQL_TYPE_INT24,
+    LONGLONG = c.MYSQL_TYPE_LONGLONG,
+    DECIMAL = c.MYSQL_TYPE_DECIMAL,
+    NEWDECIMAL = c.MYSQL_TYPE_NEWDECIMAL,
+    FLOAT = c.MYSQL_TYPE_FLOAT,
+    DOUBLE = c.MYSQL_TYPE_DOUBLE,
+    BIT = c.MYSQL_TYPE_BIT,
+    TIMESTAMP = c.MYSQL_TYPE_TIMESTAMP,
+    DATE = c.MYSQL_TYPE_DATE,
+    TIME = c.MYSQL_TYPE_TIME,
+    DATETIME = c.MYSQL_TYPE_DATETIME,
+    YEAR = c.MYSQL_TYPE_YEAR,
+    STRING = c.MYSQL_TYPE_STRING,
+    VAR_STRING = c.MYSQL_TYPE_VAR_STRING,
+    BLOB = c.MYSQL_TYPE_BLOB,
+    SET = c.MYSQL_TYPE_SET,
+    ENUM = c.MYSQL_TYPE_ENUM,
+    GEOMETRY = c.MYSQL_TYPE_GEOMETRY,
+    NULL = c.MYSQL_TYPE_NULL,
 };

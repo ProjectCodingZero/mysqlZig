@@ -16,28 +16,25 @@ pub fn build(b: *std.Build) void {
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
     // running `zig build`).
-    const mysql_module = b.dependency("mysql", .{
-        .root_source_file = .{"/src/mysql.zig"},
-    })
-    const lib = b.addStaticLibrary(.{
-        .name = "mysql",
+    const mysql_module = b.createModule(.{
         .root_source_file = b.path("src/mysql.zig"),
-        .target = target,
-        .optimize = optimize,
         .link_libc = true,
+        .optimize = optimize,
+        .target = target,
     });
-    lib.linkSystemLibrary("mysqlclient");
+
+    mysql_module.linkSystemLibrary("mysqlclient", .{});
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
-    b.installArtifact(lib);
 
     const connection_test = b.addTest(.{
         .name = "connection_test",
         .root_source_file = b.path("test/Connection.zig"),
         .target = target,
+        .optimize = optimize,
     });
-    connection_test.linkLibrary(lib);
+    connection_test.root_module.addImport("mysql", mysql_module);
     const test_cmd = b.addRunArtifact(connection_test);
     test_cmd.step.dependOn(b.getInstallStep());
     const test_step = b.step("test", "run the test");
