@@ -8,22 +8,22 @@ const Database = struct {
     database: [:0]const u8,
     port: u32 = 3306,
 };
-
+pub const ServerError = error{
+    ServerGone,
+    ServerLost,
+};
 pub const DatabaseError = error{
     ConnectionLost,
     DatabaseNotFound,
     BadHost,
 
     CommandsOutofSync,
-    ServerGone,
-    ServerLost,
     UnknownError,
 };
 pub const MemoryError = error{
     OutOfMemory,
     OutOfResources,
 };
-pub const All = DatabaseError || MemoryError;
 const c = @cImport({
     @cInclude("mysql.h");
 });
@@ -56,43 +56,40 @@ pub const DB = struct {
             print("Connect to database failed: {s}\n", .{c.mysql_error(db)});
             return DatabaseError.DatabaseNotFound;
         }
-        const self = Self{
+        return .{
             .conn = db,
             .allocator = allocator,
         };
-        return self;
     }
-
+    pub fn StatementInit(self: Self) MemoryError!Statement {
+        const statement: *c.MYSQL_STMT = c.mysql_stmt_init(self.conn);
+        if (statement == null) {
+            return MemoryError.OutOfMemory;
+        }
+        return .{
+            .statement = statement,
+        };
+    }
     pub fn deinit(self: Self) void {
         c.mysql_close(self.conn);
     }
 
-    pub fn execute(self: DB, query: []const u8) DatabaseError!void {
-        const success: c_uint = c.mysql_real_query(self.conn, query.ptr, query.len);
-        return switch (success) {
-            //Success case
-            0 => return,
-
-            //Commands were executed in an improper order.
-            c.CR_COMMANDS_OUT_OF_SYNC => DatabaseError.CommandsOutofSync,
-
-            //The MySQL server has gone away.
-            c.CR_SERVER_GONE_ERROR => DatabaseError.ServerGone,
-
-            //The connection to the server was lost during the query.
-            c.CR_SERVER_LOST => DatabaseError.ServerLost,
-
-            //An unknown error occurred.
-            c.CR_UNKNOWN_ERROR => DatabaseError.UnknownError,
-
-            else => unreachable,
-        };
-    }
     pub fn autoCommit(self: Self, mode: bool) void {
         c.autoCommit(self.conn, mode);
     }
     pub fn commit(self: Self) bool {
         return c.mysql_commit(self.conn);
+    }
+};
+
+const Statement = struct {
+    statement: *c.MYSQL_STMT,
+    query: [:0]const u8 = "",
+
+    const Self = @This();
+
+    pub fn setQuery(self: Self, query: [:0]const u8) void {
+        self.query = query;
     }
     pub fn queryTable(self: DB) !void {
         const query =
@@ -164,7 +161,6 @@ pub const DB = struct {
 
             break :blk stmt.?;
         };
-        defer _ = c.mysql_stmt_close(insert_cat_stmt);
 
         inline for (cat_colors) |row| {
             const color = row.@"0";
@@ -210,8 +206,40 @@ pub const DB = struct {
             }
         }
     }
-};
+    pub fn deinit(self: Self) (ServerError || DatabaseError) {
+        const case: c_uint = c.mysql_stmt_close(self.statement);
+        return switch (case) {
+            0 => return,
 
+            c.CR_SERVER_GONE_ERROR => ServerError.ServerGone,
+
+            c.CR_UNKNOWN_ERROR => DatabaseError.UnknownError,
+
+            else => unreachable,
+        };
+    }
+    pub fn execute(self: Self) (DatabaseError || ServerError)!void {
+        const case: c_uint = c.mysql_real_query(self.conn, self.query.ptr, self.query.len);
+        return switch (case) {
+            //Success case
+            0 => return,
+
+            //Commands were executed in an improper order.
+            c.CR_COMMANDS_OUT_OF_SYNC => DatabaseError.CommandsOutofSync,
+
+            //The MySQL server has gone away.
+            c.CR_SERVER_GONE_ERROR => ServerError.ServerGone,
+
+            //The connection to the server was lost during the query.
+            c.CR_SERVER_LOST => ServerError.ServerLost,
+
+            //An unknown error occurred.
+            c.CR_UNKNOWN_ERROR => DatabaseError.UnknownError,
+
+            else => unreachable,
+        };
+    }
+};
 pub const types = enum(c_int) {
     TYNY = c.MYSQL_TYPE_TINY,
     SHORT = c.MYSQL_TYPE_SHORT,
